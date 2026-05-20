@@ -24,7 +24,7 @@ db.serialize(() => {
   // Create default row if missing
   db.run(`
     INSERT OR IGNORE INTO message_store (id, message)
-    VALUES (1, 'ESP32 Ready')
+    VALUES (1, 'HONK! No message found...')
   `);
 });
 
