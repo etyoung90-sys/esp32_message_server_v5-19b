@@ -14,6 +14,7 @@ const db = new sqlite3.Database('./messages.db');
 // Create table if needed
 db.serialize(() => {
 
+  // Current active message
   db.run(`
     CREATE TABLE IF NOT EXISTS message_store (
       id INTEGER PRIMARY KEY,
@@ -21,7 +22,16 @@ db.serialize(() => {
     )
   `);
 
-  // Create default row if missing
+  // Message history table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS message_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Ensure current message row exists
   db.run(`
     INSERT OR IGNORE INTO message_store (id, message)
     VALUES (1, 'HONK! No message found...')
@@ -33,50 +43,109 @@ app.get('/', (req, res) => {
 
   db.get(
     `SELECT message FROM message_store WHERE id = 1`,
-    (err, row) => {
+    (err, currentRow) => {
 
-      const currentMessage = row ? row.message : '';
+      const currentMessage = currentRow
+        ? currentRow.message
+        : '';
 
-      res.send(`
-        <html>
-        <body style="font-family:sans-serif;padding:40px;max-width:600px;">
+      db.all(
+        `
+        SELECT *
+        FROM message_history
+        ORDER BY timestamp DESC
+        LIMIT 20
+        `,
+        (historyErr, rows) => {
 
-          <h1>ESP32 Message Controller</h1>
+          let historyHTML = '';
 
-          <p><strong>Current Message:</strong></p>
+          rows.forEach(row => {
 
-          <div style="
-            padding:15px;
-            background:#f0f0f0;
-            border-radius:8px;
-            margin-bottom:20px;
-          ">
-            ${currentMessage}
-          </div>
+            historyHTML += `
+              <div style="
+                padding:10px;
+                margin-bottom:10px;
+                background:#f5f5f5;
+                border-radius:8px;
+              ">
 
-          <form method="POST" action="/update">
+                <div style="
+                  font-size:12px;
+                  color:gray;
+                  margin-bottom:5px;
+                ">
+                  ${row.timestamp}
+                </div>
 
-            <textarea
-              name="message"
-              rows="5"
-              style="width:100%;padding:10px;font-size:16px;"
-              placeholder="Enter message..."
-            ></textarea>
+                <div>
+                  ${row.message}
+                </div>
 
-            <br><br>
+              </div>
+            `;
+          });
 
-            <button
-              type="submit"
-              style="padding:12px 20px;font-size:16px;"
-            >
-              Send Message
-            </button>
+          res.send(`
+            <html>
 
-          </form>
+            <body style="
+              font-family:sans-serif;
+              padding:40px;
+              max-width:700px;
+            ">
 
-        </body>
-        </html>
-      `);
+              <h1>ESP32 Message Controller</h1>
+
+              <h2>Current Message</h2>
+
+              <div style="
+                padding:15px;
+                background:#f0f0f0;
+                border-radius:8px;
+                margin-bottom:30px;
+              ">
+                ${currentMessage}
+              </div>
+
+              <form method="POST" action="/update">
+
+                <textarea
+                  name="message"
+                  rows="5"
+                  style="
+                    width:100%;
+                    padding:10px;
+                    font-size:16px;
+                  "
+                  placeholder="Enter message..."
+                ></textarea>
+
+                <br><br>
+
+                <button
+                  type="submit"
+                  style="
+                    padding:12px 20px;
+                    font-size:16px;
+                  "
+                >
+                  Send Message
+                </button>
+
+              </form>
+
+              <hr style="margin:40px 0;">
+
+              <h2>Message History</h2>
+
+              ${historyHTML}
+
+            </body>
+            </html>
+          `);
+        }
+      );
     }
   );
 });
@@ -86,6 +155,7 @@ app.post('/update', (req, res) => {
 
   const newMessage = req.body.message || '';
 
+  // Update current active message
   db.run(
     `UPDATE message_store SET message = ? WHERE id = 1`,
     [newMessage],
@@ -96,9 +166,21 @@ app.post('/update', (req, res) => {
         return res.status(500).send('Database error');
       }
 
-      console.log('Message updated:', newMessage);
+      // Save message to history table
+      db.run(
+        `INSERT INTO message_history (message) VALUES (?)`,
+        [newMessage],
+        (historyErr) => {
 
-      res.redirect('/');
+          if (historyErr) {
+            console.error(historyErr);
+          }
+
+          console.log('Message updated:', newMessage);
+
+          res.redirect('/');
+        }
+      );
     }
   );
 });
